@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Coach - Squat Counter</title>
+    <style>
+        body { font-family: sans-serif; text-align: center; background: #111; color: white; margin: 0; padding: 20px; }
+        video, canvas { width: 100%; max-width: 400px; border-radius: 10px; transform: scaleX(-1); }
+        #counter { font-size: 48px; font-weight: bold; color: #00ff00; margin: 20px 0; }
+        #feedback { font-size: 20px; color: #ffaa00; }
+    </style>
+</head>
+<body>
+    <h1>AI Coach</h1>
+    <div id="counter">0</div>
+    <div id="feedback">Placez-vous de profil...</div>
+    <video id="video" autoplay playsinline></video>
+    <canvas id="canvas"></canvas>
+
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+    <script>
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const counterElement = document.getElementById('counter');
+        
+        let counter = 0;
+        let state = "up"; // "up" ou "down"
+
+        // Fonction pour calculer l'angle entre 3 points
+        function calculateAngle(a, b, c) {
+            let radians = Math.atan2(c.y - b.y, c.x - b.x) - Math.atan2(a.y - b.y, a.x - b.x);
+            let angle = Math.abs((radians * 180.0) / Math.PI);
+            if (angle > 180.0) angle = 360 - angle;
+            return angle;
+        }
+
+        // Initialisation de MediaPipe
+        const pose = new Pose({
+            locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
+        });
+
+        pose.setOptions({
+            modelComplexity: 1,
+            smoothLandmarks: true,
+            minDetectionConfidence: 0.5,
+            minTrackingConfidence: 0.5
+        });
+
+        // Ce qui se passe à chaque image de la vidéo
+        pose.onResults((results) => {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
+
+            if (results.poseLandmarks) {
+                // Dessiner le squelette sur la vidéo
+                drawConnectors(ctx, results.poseLandmarks, POSE_CONNECTIONS, {color: '#00FF00', lineWidth: 4});
+                drawLandmarks(ctx, results.poseLandmarks, {color: '#FF0000', lineWidth: 2});
+
+                // Récupérer les points de la hanche, du genou et de la cheville (côté gauche)
+                const hip = results.poseLandmarks[23];
+                const knee = results.poseLandmarks[25];
+                const ankle = results.poseLandmarks[27];
+
+                if (hip && knee && ankle) {
+                    // Calcul de l'angle du genou
+                    const angle = calculateAngle(hip, knee, ankle);
+                    
+                    // Logique de comptage (seuil de 90° pour descendre, 160° pour remonter)
+                    if (angle < 90) {
+                        if (state === "up") {
+                            state = "down";
+                            document.getElementById('feedback').innerText = "Descends bien...";
+                        }
+                    } else if (angle > 160) {
+                        if (state === "down") {
+                            state = "up";
+                            counter++;
+                            counterElement.innerText = counter;
+                            document.getElementById('feedback').innerText = "Bonne répétition !";
+                        }
+                    }
+                }
+            }
+        });
+
+        // Lancer la caméra
+        async function startCamera() {
+            const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+            video.srcObject = stream;
+            
+            // Boucle pour envoyer les images à l'IA
+            async function processFrame() {
+                await pose.send({ image: video });
+                requestAnimationFrame(processFrame);
+            }
+            video.onloadedmetadata = () => {
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+                processFrame();
+            };
+        }
+
+        startCamera();
+    </script>
+</body>
+</html>
